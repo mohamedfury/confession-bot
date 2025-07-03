@@ -1,54 +1,66 @@
+import telebot
 
-from aiogram import Bot, Dispatcher, executor, types
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+API_TOKEN = "7787936953:AAHI6UWGZeddq76Dny5FNFtqTgXm5OFvSpA"
+GROUP_CHAT_ID = -1001201718722  # رقم الكروب
+ADMIN_ID = 674291793  # إيديك
 
-API_TOKEN = '7787936953:AAHI6UWGZeddq76Dny5FNFtqTgXm5OFvSpA'
-DEVELOPER_ID = 674291793
-GROUP_ID = -1001201718722
+bot = telebot.TeleBot(API_TOKEN)
 
-bot = Bot(token=API_TOKEN)
-dp = Dispatcher(bot)
+confessions_open = False
+pending_confession = None
 
-admissions_open = False
+@bot.message_handler(commands=['start'])
+def start(message):
+    bot.reply_to(message, "أهلاً! أرسل لي اعترافك سرا وأنا راح أبلّغ المسؤول.")
 
-@dp.message_handler(commands=['start'])
-async def start(message: types.Message):
-    await message.reply("اهلا بك في بوت الاعترافات 🌚\nاذا الاعترافات مفتوحة اكدر استلم منك رسالتك.")
+@bot.message_handler(func=lambda m: m.chat.id == GROUP_CHAT_ID)
+def handle_group(message):
+    global confessions_open
+    text = message.text.lower()
+    if message.from_user.id != ADMIN_ID:
+        return  # فقط للمطور
 
-@dp.message_handler(lambda message: message.chat.type == 'supergroup')
-async def group_commands(message: types.Message):
-    global admissions_open
-    if message.from_user.id == DEVELOPER_ID:
-        if message.text == "فتح الاعترافات":
-            admissions_open = True
-            await message.reply("✅ تم فتح الاعترافات.")
-        elif message.text == "ايقاف الاعترافات":
-            admissions_open = False
-            await message.reply("⛔ تم ايقاف الاعترافات.")
+    if text == "فتح الاعترافات":
+        confessions_open = True
+        bot.reply_to(message, "تم فتح الاعترافات.")
+    elif text == "ايقاف الاعترافات":
+        confessions_open = False
+        bot.reply_to(message, "تم إيقاف الاعترافات.")
 
-@dp.message_handler(lambda message: message.chat.type == 'private')
-async def handle_confession(message: types.Message):
-    if not admissions_open:
-        await message.reply("🚫 الاعترافات مغلقة حالياً.")
+@bot.message_handler(func=lambda m: m.chat.type == 'private')
+def handle_private(message):
+    global confessions_open, pending_confession
+    if not confessions_open:
+        bot.reply_to(message, "الاعترافات مغلقة حالياً.")
         return
 
-    keyboard = InlineKeyboardMarkup().add(
-        InlineKeyboardButton("نشر", callback_data=f"publish|{message.message_id}"),
-        InlineKeyboardButton("حذف", callback_data=f"delete|{message.message_id}")
+    # سجل الاعتراف مؤقتًا
+    pending_confession = {
+        "user_id": message.from_user.id,
+        "username": message.from_user.username or "غير معروف",
+        "text": message.text
+    }
+    # أرسل للمطور خيارات نشر أو حذف
+    markup = telebot.types.InlineKeyboardMarkup()
+    markup.add(
+        telebot.types.InlineKeyboardButton("نشر", callback_data="publish"),
+        telebot.types.InlineKeyboardButton("حذف", callback_data="delete")
     )
-    await bot.send_message(DEVELOPER_ID, f"📝 اعتراف جديد:\n\n{message.text}", reply_markup=keyboard)
+    bot.send_message(ADMIN_ID,
+        f"اعتراف جديد من @{pending_confession['username']}:\n\n{pending_confession['text']}",
+        reply_markup=markup
+    )
+    bot.reply_to(message, "تم استلام اعترافك وسيراجعه المسؤول.")
 
-@dp.callback_query_handler()
-async def handle_decision(call: types.CallbackQuery):
-    action, msg_id = call.data.split("|")
+@bot.callback_query_handler(func=lambda call: call.from_user.id == ADMIN_ID)
+def callback_handler(call):
+    global pending_confession, confessions_open
+    if call.data == "publish" and pending_confession:
+        bot.send_message(GROUP_CHAT_ID, f"اعتراف مجهول:\n\n{pending_confession['text']}")
+        bot.answer_callback_query(call.id, "تم نشر الاعتراف.")
+        pending_confession = None
+    elif call.data == "delete" and pending_confession:
+        bot.answer_callback_query(call.id, "تم حذف الاعتراف.")
+        pending_confession = None
 
-    if action == "publish":
-        confession_text = call.message.text.replace("📝 اعتراف جديد:\n\n", "")
-        await bot.send_message(GROUP_ID, f"💭 اعتراف مجهول:\n\n{confession_text}")
-        await call.message.edit_text("✅ تم نشر الاعتراف.")
-    elif action == "delete":
-        await call.message.edit_text("❌ تم حذف الاعتراف.")
-
-if __name__ == '__main__':
-    executor.start_polling(dp, skip_updates=True)
-  
+bot.infinity_polling()
