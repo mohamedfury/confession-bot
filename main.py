@@ -7,7 +7,7 @@ ADMIN_ID = 674291793  # إيديك
 bot = telebot.TeleBot(API_TOKEN)
 
 confessions_open = False
-pending_confession = None
+pending_confessions = {}  # يخزن الاعترافات مع معرفها
 
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -16,10 +16,9 @@ def start(message):
 @bot.message_handler(func=lambda m: m.chat.id == GROUP_CHAT_ID)
 def handle_group(message):
     global confessions_open
-    text = message.text.lower()
     if message.from_user.id != ADMIN_ID:
-        return  # فقط للمطور
-
+        return
+    text = message.text.lower()
     if text == "فتح الاعترافات":
         confessions_open = True
         bot.reply_to(message, "تم فتح الاعترافات.")
@@ -29,39 +28,27 @@ def handle_group(message):
 
 @bot.message_handler(func=lambda m: m.chat.type == 'private')
 def handle_private(message):
-    global confessions_open, pending_confession
+    global confessions_open, pending_confessions
     if not confessions_open:
         bot.reply_to(message, "الاعترافات مغلقة حالياً.")
         return
 
-    # سجل الاعتراف مؤقتًا
-    pending_confession = {
-        "user_id": message.from_user.id,
-        "username": message.from_user.username or "غير معروف",
+    confession_id = message.message_id  # مفتاح فريد لكل اعتراف
+    pending_confessions[confession_id] = {
         "text": message.text
     }
-    # أرسل للمطور فقط نص الاعتراف مع خيار نشر أو حذف (بدون اسم المرسل)
+
     markup = telebot.types.InlineKeyboardMarkup()
     markup.add(
-        telebot.types.InlineKeyboardButton("نشر", callback_data="publish"),
-        telebot.types.InlineKeyboardButton("حذف", callback_data="delete")
+        telebot.types.InlineKeyboardButton("نشر", callback_data=f"publish_{confession_id}"),
+        telebot.types.InlineKeyboardButton("حذف", callback_data=f"delete_{confession_id}")
     )
+
     bot.send_message(ADMIN_ID,
-        f"اعتراف جديد:\n\n{pending_confession['text']}",
-        reply_markup=markup
-    )
+                     f"اعتراف جديد:\n\n{message.text}",
+                     reply_markup=markup)
     bot.reply_to(message, "تم استلام اعترافك وسيراجعه المسؤول.")
 
 @bot.callback_query_handler(func=lambda call: call.from_user.id == ADMIN_ID)
 def callback_handler(call):
-    global pending_confession, confessions_open
-    if call.data == "publish" and pending_confession:
-        # ينشر الاعتراف في الكروب بدون ذكر اسم أو إيدي
-        bot.send_message(GROUP_CHAT_ID, f"اعتراف مجهول:\n\n{pending_confession['text']}")
-        bot.answer_callback_query(call.id, "تم نشر الاعتراف.")
-        pending_confession = None
-    elif call.data == "delete" and pending_confession:
-        bot.answer_callback_query(call.id, "تم حذف الاعتراف.")
-        pending_confession = None
-
-bot.infinity_polling()
+    global
