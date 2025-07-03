@@ -40,14 +40,14 @@ def handle_private(message):
         "username": message.from_user.username or "غير معروف",
         "text": message.text
     }
-    # أرسل للمطور خيارات نشر أو حذف
+    # أرسل للمطور فقط نص الاعتراف مع خيار نشر أو حذف (بدون اسم المرسل)
     markup = telebot.types.InlineKeyboardMarkup()
     markup.add(
         telebot.types.InlineKeyboardButton("نشر", callback_data="publish"),
         telebot.types.InlineKeyboardButton("حذف", callback_data="delete")
     )
     bot.send_message(ADMIN_ID,
-        f"اعتراف جديد من @{pending_confession['username']}:\n\n{pending_confession['text']}",
+        f"اعتراف جديد:\n\n{pending_confession['text']}",
         reply_markup=markup
     )
     bot.reply_to(message, "تم استلام اعترافك وسيراجعه المسؤول.")
@@ -56,6 +56,7 @@ def handle_private(message):
 def callback_handler(call):
     global pending_confession, confessions_open
     if call.data == "publish" and pending_confession:
+        # ينشر الاعتراف في الكروب بدون ذكر اسم أو إيدي
         bot.send_message(GROUP_CHAT_ID, f"اعتراف مجهول:\n\n{pending_confession['text']}")
         bot.answer_callback_query(call.id, "تم نشر الاعتراف.")
         pending_confession = None
