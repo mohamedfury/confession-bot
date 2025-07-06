@@ -148,7 +148,7 @@ def send_confession_to_owner(group_id, message):
     group_owner_id = DEVELOPER_ID
 
     try:
-        caption = f"📢 اعتراف جديد في المجموعة: {group_id}\n\n" \
+        caption = f"📢 اعتراف جديد في المجموعة: {groups.get(str(group_id), group_id)}\n\n" \
                   f"من: {message.from_user.first_name} (ID: {message.from_user.id})\n\n"
 
         if message.content_type == 'text':
@@ -172,32 +172,36 @@ def send_confession_to_owner(group_id, message):
         bot.send_message(message.from_user.id, "❌ حدث خطأ أثناء إرسال اعترافك.")
         print("Error sending confession:", e)
 
-# --- أوامر باللغة العربية ---
-# --- قفل/فتح الاعترافات ---
+# --- قفل وفتح الاعترافات للمجموعة ---
 @bot.message_handler(commands=['قفل', 'فتح'])
 def lock_unlock_confession(message):
     user_id = message.from_user.id
-    if user_id != DEVELOPER_ID and message.from_user.id not in [int(x) for x in groups.keys() if groups[x] in [bot.get_chat_member(int(x), user_id).status in ['administrator', 'creator']]]:
-        bot.reply_to(message, "🚫 هذا الأمر فقط للمطور أو مدراء المجموعة.")
+    group_id = str(message.chat.id)
+
+    if message.chat.type == 'private':
+        bot.reply_to(message, "🚫 هذا الأمر يستخدم فقط داخل المجموعات.")
         return
 
-    args = message.text.split()
-    if len(args) != 2:
-        bot.reply_to(message, "🔢 استخدم الأمر مع معرف المجموعة: /قفل <group_id>")
-        return
-
-    group_id = args[1]
+    if user_id != DEVELOPER_ID:
+        try:
+            member = bot.get_chat_member(message.chat.id, user_id)
+            if member.status not in ['administrator', 'creator']:
+                bot.reply_to(message, "🚫 هذا الأمر فقط للمطور أو مدراء المجموعة.")
+                return
+        except Exception:
+            bot.reply_to(message, "⚠️ حدث خطأ أثناء التحقق من صلاحياتك.")
+            return
 
     if message.text.startswith('/قفل'):
         confession_locks[group_id] = True
-    else:
+        save_json('confession_locks.json', confession_locks)
+        bot.reply_to(message, "✅ تم قفل استقبال الاعترافات في هذه المجموعة.")
+    elif message.text.startswith('/فتح'):
         confession_locks[group_id] = False
+        save_json('confession_locks.json', confession_locks)
+        bot.reply_to(message, "✅ تم فتح استقبال الاعترافات في هذه المجموعة.")
 
-    save_json('confession_locks.json', confession_locks)
-    action = "تم قفل" if message.text.startswith('/قفل') else "تم فتح"
-    bot.reply_to(message, f"✅ {action} الاعترافات في المجموعة {group_id}")
-
-# --- حظر/رفع حظر ---
+# --- حظر ورفع الحظر ---
 @bot.message_handler(commands=['حظر', 'الغاء_الحظر'])
 def ban_unban(message):
     user_id = message.from_user.id
@@ -221,7 +225,7 @@ def ban_unban(message):
     action = "تم حظر" if message.text.startswith('/حظر') else "تم رفع الحظر عن"
     bot.reply_to(message, f"✅ {action} المستخدم {target_id}")
 
-# --- إضافة رسالة تحفيزية جديدة ---
+# --- إضافة رسالة تحفيزية ---
 @bot.message_handler(commands=['اضافة_رسالة'])
 def add_motivational_message(message):
     user_id = message.from_user.id
@@ -239,7 +243,7 @@ def add_motivational_message(message):
     save_json('messages.json', messages)
     bot.reply_to(message, "✅ تمت إضافة الرسالة التحفيزية بنجاح.")
 
-# --- رسائل تحفيزية دورية ---
+# --- إرسال رسائل تحفيزية دورية ---
 def send_motivational_messages():
     for gid in groups.keys():
         try:
