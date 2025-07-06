@@ -9,7 +9,6 @@ DEVELOPER_ID = 123456789  # حط ايديك هنا
 
 bot = telebot.TeleBot(TOKEN)
 
-# تحميل وحفظ JSON
 def load_json(filename):
     try:
         with open(filename, 'r', encoding='utf-8') as f:
@@ -56,21 +55,10 @@ def send_welcome(message):
     if message.chat.type == 'private':
         bot.send_message(message.chat.id, START_MSG)
 
-@bot.message_handler(commands=['broadcast'])
-def broadcast(message):
-    if message.from_user.id != DEVELOPER_ID:
-        bot.reply_to(message, "هذا الأمر فقط للمطور.")
-        return
-    text = message.text.partition(' ')[2]
-    if not text:
-        bot.reply_to(message, "أرسل نص الإذاعة بعد الأمر.")
-        return
-    for chat_id in groups.keys():
-        try:
-            bot.send_message(int(chat_id), f"📢 {text}")
-        except:
-            pass
-    bot.reply_to(message, "تم الإذاعة.")
+# حذف هذا الجزء لأننا ما نريد البوت يرد في الكروبات على الرسائل العادية
+# @bot.message_handler(func=lambda m: m.chat.type != 'private')
+# def reply_group_message(message):
+#     bot.reply_to(message, "يرجى إرسال اعترافك لي في الخاص.")
 
 @bot.message_handler(func=lambda m: m.chat.type == 'private', content_types=['text', 'photo', 'audio', 'voice', 'video', 'document'])
 def handle_confession(message):
@@ -81,7 +69,7 @@ def handle_confession(message):
         return
 
     if not can_send_confession(user_id):
-        bot.send_message(user_id, "يرجى الانتظار قبل إرسال اعتراف جديد (60 ثانية بين كل اعتراف).")
+        bot.send_message(user_id, "يرجى الانتظار 60 ثانية بين كل اعتراف.")
         return
 
     user_groups = []
@@ -94,7 +82,7 @@ def handle_confession(message):
             pass
 
     if len(user_groups) == 0:
-        bot.send_message(user_id, "لا يوجد لديك مجموعات مشتركة مع البوت لإرسال الاعتراف.")
+        bot.send_message(user_id, "لا توجد لديك مجموعات مشتركة مع البوت لإرسال الاعتراف.")
         return
     elif len(user_groups) == 1:
         group_id = user_groups[0]
@@ -112,7 +100,7 @@ def handle_confession(message):
             except:
                 pass
         bot.send_message(user_id, "اختر المجموعة التي تريد إرسال الاعتراف لها:", reply_markup=markup)
-        # لتبسيط هنا تطلب من المستخدم يعيد إرسال الاعتراف بعد الاختيار
+        # تطلب منه يعيد إرسال الاعتراف بعد الاختيار
         return
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("select_group_"))
@@ -132,25 +120,31 @@ def callback_select_group(call):
     bot.send_message(user_id, "الرجاء إعادة إرسال اعترافك الآن.")
 
 def send_confession_to_owner(group_id, message):
-    group_owner_id = DEVELOPER_ID  # يمكن تعديل حسب مالك المجموعة
+    group_owner_id = DEVELOPER_ID  # عدل هنا إذا عندك مالك مختلف لكل مجموعة
 
     try:
-        if message.content_type == 'text':
+        content_type = message.content_type
+        text = ""
+
+        if content_type == 'text':
             text = message.text
-        elif message.content_type == 'photo':
+        elif content_type == 'photo':
             text = "[صورة مرفقة]"
-        elif message.content_type == 'audio':
+        elif content_type == 'audio':
             text = "[صوت مرفق]"
-        elif message.content_type == 'voice':
+        elif content_type == 'voice':
             text = "[رسالة صوتية]"
-        elif message.content_type == 'video':
+        elif content_type == 'video':
             text = "[فيديو مرفق]"
-        elif message.content_type == 'document':
+        elif content_type == 'document':
             text = "[ملف مرفق]"
         else:
             text = "[نوع رسالة غير مدعوم]"
 
-        caption = f"📢 اعتراف جديد في المجموعة: {group_id}\n\n{message.from_user.first_name} (id: {message.from_user.id})\n\nالمحتوى:\n{text}"
+        caption = f"📢 اعتراف جديد في المجموعة: {group_id}\n\n" \
+                  f"من: {message.from_user.first_name} (id: {message.from_user.id})\n\n" \
+                  f"المحتوى:\n{text}"
+
         bot.send_message(group_owner_id, caption)
         bot.send_message(message.from_user.id, "تم إرسال اعترافك إلى مالك المجموعة بنجاح.")
     except Exception as e:
