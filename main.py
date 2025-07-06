@@ -1,73 +1,64 @@
 import telebot
+import json
+import time
 
-API_TOKEN = "7787936953:AAHN8i_5q3u0RVuEaHDvKi7TqhyUmtxbuMc"
-GROUP_CHAT_ID = -1001201718722
-ADMIN_ID = 674291793
+TOKEN = "7787936953:AAFPyBi4QPJWQKQB9qM3dBzQwizFYh3XjU0"
+DEVELOPER_ID = 674291793  # عدلها على إيديك
 
-bot = telebot.TeleBot(API_TOKEN)
+bot = telebot.TeleBot(TOKEN)
 
-confessions_open = False
-pending_confessions = {}  # نخزن الاعترافات مؤقتاً باستخدام message_id
+GROUPS_FILE = "groups.json"
+BANNED_FILE = "banned.json"
+LOCKS_FILE = "confession_locks.json"
+LAST_CONF_FILE = "last_confession_time.json"
 
-@bot.message_handler(commands=['start'])
-def start(message):
-    bot.reply_to(message, "أهلاً! أرسل لي اعترافك سرا وأنا راح أبلّغ المسؤول.")
+def load_json(file):
+    try:
+        with open(file, "r") as f:
+            return json.load(f)
+    except:
+        return {}
 
-@bot.message_handler(func=lambda m: m.chat.id == GROUP_CHAT_ID)
-def handle_group(message):
-    global confessions_open
-    if message.from_user.id != ADMIN_ID:
+def save_json(file, data):
+    with open(file, "w") as f:
+        json.dump(data, f, indent=4)
+
+groups = load_json(GROUPS_FILE)
+banned_users = load_json(BANNED_FILE)
+locks = load_json(LOCKS_FILE)
+last_conf = load_json(LAST_CONF_FILE)
+
+def can_send_confession(user_id):
+    now = time.time()
+    if str(user_id) in last_conf:
+        elapsed = now - last_conf[str(user_id)]
+        if elapsed < 60:
+            return False, 60 - int(elapsed)
+    last_conf[str(user_id)] = now
+    save_json(LAST_CONF_FILE, last_conf)
+    return True, 0
+
+def is_owner(message):
+    admins = bot.get_chat_administrators(message.chat.id)
+    for admin in admins:
+        if admin.status == 'creator' and admin.user.id == message.from_user.id:
+            return True
+    return False
+
+@bot.message_handler(commands=['ban'])
+def ban_user(message):
+    if message.chat.type not in ['group', 'supergroup']:
+        bot.reply_to(message, "هذا الأمر فقط في المجموعات.")
         return
-    text = message.text.lower()
-    if text == "فتح الاعترافات":
-        confessions_open = True
-        bot.reply_to(message, "✅ تم فتح الاعترافات.")
-    elif text == "ايقاف الاعترافات":
-        confessions_open = False
-        bot.reply_to(message, "🛑 تم إيقاف الاعترافات.")
-
-@bot.message_handler(func=lambda m: m.chat.type == 'private')
-def handle_private(message):
-    global confessions_open, pending_confessions
-    if not confessions_open:
-        bot.reply_to(message, "الاعترافات مغلقة حالياً ❌")
+    if not is_owner(message):
+        bot.reply_to(message, "أنت مو مالك الكروب.")
         return
+    if not message.reply_to_message:
+        bot.reply_to(message, "قم بالرد على رسالة العضو اللي تريد تحظره.")
+        return
+    user_id = message.reply_to_message.from_user.id
+    banned_users[str(user_id)] = True
+    save_json(BANNED_FILE, banned_users)
+    bot.reply_to(message, f"تم حظر العضو {user_id} بنجاح.")
 
-    confession_id = message.message_id
-    pending_confessions[confession_id] = {
-        "text": message.text
-    }
-
-    markup = telebot.types.InlineKeyboardMarkup()
-    markup.add(
-        telebot.types.InlineKeyboardButton("✅ نشر", callback_data=f"publish_{confession_id}"),
-        telebot.types.InlineKeyboardButton("❌ حذف", callback_data=f"delete_{confession_id}")
-    )
-
-    bot.send_message(ADMIN_ID,
-                     f"📩 اعتراف جديد:\n\n{message.text}",
-                     reply_markup=markup)
-    bot.reply_to(message, "تم استلام اعترافك وسيراجعه المسؤول ✅")
-
-@bot.callback_query_handler(func=lambda call: call.from_user.id == ADMIN_ID)
-def callback_handler(call):
-    global pending_confessions
-    data = call.data
-    if data.startswith("publish_"):
-        confession_id = int(data.split("_")[1])
-        confession = pending_confessions.get(confession_id)
-        if confession:
-            bot.send_message(GROUP_CHAT_ID, f"🕵️ اعتراف مجهول:\n\n{confession['text']}")
-            bot.answer_callback_query(call.id, "تم نشر الاعتراف.")
-            pending_confessions.pop(confession_id)
-        else:
-            bot.answer_callback_query(call.id, "❗ هذا الاعتراف غير موجود.")
-    elif data.startswith("delete_"):
-        confession_id = int(data.split("_")[1])
-        if confession_id in pending_confessions:
-            pending_confessions.pop(confession_id)
-            bot.answer_callback_query(call.id, "تم حذف الاعتراف.")
-        else:
-            bot.answer_callback_query(call.id, "❗ هذا الاعتراف غير موجود.")
-
-bot.infinity_polling()
+bot.polling()
