@@ -3,12 +3,14 @@ import json
 import time
 import threading
 import random
+import os
 
 TOKEN = "7787936953:AAFPyBi4QPJWQKQB9qM3dBzQwizFYh3XjU0"
-DEVELOPER_ID = 674291793  # عدلها على إيديك
+DEVELOPER_ID = 674291793  # غيره للايدي مالك
 
 bot = telebot.TeleBot(TOKEN)
 
+# ملفات حفظ البيانات
 GROUPS_FILE = "groups.json"
 BANNED_FILE = "banned.json"
 LOCKS_FILE = "confession_locks.json"
@@ -16,11 +18,10 @@ LAST_CONF_FILE = "last_confession_time.json"
 MESSAGES_FILE = "messages.json"
 
 def load_json(file):
-    try:
-        with open(file, "r") as f:
-            return json.load(f)
-    except:
+    if not os.path.exists(file):
         return {}
+    with open(file, "r") as f:
+        return json.load(f)
 
 def save_json(file, data):
     with open(file, "w") as f:
@@ -49,7 +50,7 @@ def is_owner(user_id, chat_id):
             if admin.status == 'creator' and admin.user.id == user_id:
                 return True
     except:
-        return False
+        pass
     return False
 
 def is_admin(user_id, chat_id):
@@ -59,31 +60,50 @@ def is_admin(user_id, chat_id):
             if admin.user.id == user_id:
                 return True
     except:
-        return False
+        pass
     return False
 
-def send_confession_to_owner(chat_id, confession, sender):
-    # تأكد إذا القفل مفتوح
+def send_confession_to_owner(chat_id, confession_content, sender, content_type='text'):
     if locks.get(str(chat_id), False):
         return False
 
-    # نرسل رسالة للمؤسس مع زر للموافقة
+    owner_id = None
+    try:
+        admins = bot.get_chat_administrators(chat_id)
+        for admin in admins:
+            if admin.status == 'creator':
+                owner_id = admin.user.id
+                break
+    except:
+        return False
+
+    if owner_id is None:
+        return False
+
     markup = telebot.types.InlineKeyboardMarkup()
     approve_btn = telebot.types.InlineKeyboardButton("✅ قبول الاعتراف", callback_data=f"approve_{chat_id}_{sender.id}")
     markup.add(approve_btn)
 
-    owner_id = None
-    admins = bot.get_chat_administrators(chat_id)
-    for admin in admins:
-        if admin.status == 'creator':
-            owner_id = admin.user.id
-            break
-    if owner_id is None:
-        return False
+    if content_type == 'text':
+        text = f"📢 اعتراف جديد من مجهول في المجموعة:\n\n{confession_content}"
+        bot.send_message(owner_id, text, reply_markup=markup)
+    else:
+        text = f"📢 اعتراف جديد من مجهول في المجموعة (نوع: {content_type}):"
+        bot.send_message(owner_id, text, reply_markup=markup)
+        # إرسال المحتوى حسب النوع
+        if content_type == 'photo':
+            bot.send_photo(owner_id, confession_content, reply_markup=markup)
+        elif content_type == 'audio':
+            bot.send_audio(owner_id, confession_content, reply_markup=markup)
+        elif content_type == 'voice':
+            bot.send_voice(owner_id, confession_content, reply_markup=markup)
+        elif content_type == 'video':
+            bot.send_video(owner_id, confession_content, reply_markup=markup)
+        elif content_type == 'document':
+            bot.send_document(owner_id, confession_content, reply_markup=markup)
+        else:
+            bot.send_message(owner_id, "نوع محتوى غير مدعوم.")
 
-    text = f"📢 اعتراف جديد من مجهول في المجموعة:\n\n{confession}"
-
-    bot.send_message(owner_id, text, reply_markup=markup)
     return True
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("approve_"))
@@ -99,8 +119,15 @@ def callback_approve(call):
         return
 
     # إرسال الاعتراف للمجموعة
-    text = f"💬 اعتراف مجهول:\n\n{call.message.text.split('\\n\n',1)[1]}"
-    bot.send_message(chat_id, text)
+    original_msg = call.message.reply_to_message
+    # النص الموجود في رسالة المالك السابقة
+    text_lines = call.message.text.split("\n\n",1)
+    if len(text_lines) < 2:
+        bot.answer_callback_query(call.id, "خطأ في بيانات الاعتراف.")
+        return
+    confession_text = text_lines[1]
+
+    bot.send_message(chat_id, f"💬 اعتراف مجهول:\n\n{confession_text}")
 
     bot.answer_callback_query(call.id, "تم نشر الاعتراف.")
 
@@ -172,53 +199,13 @@ def broadcast_message(message):
     if message.from_user.id != DEVELOPER_ID:
         bot.reply_to(message, "هذا الأمر خاص بالمطور فقط.")
         return
-    text = message.text[10:]
+    text = message.text[10:].strip()
     for group_id in groups.keys():
         try:
             bot.send_message(int(group_id), text)
         except:
             pass
     bot.reply_to(message, "تم إرسال الرسالة لجميع المجموعات.")
-
-@bot.message_handler(func=lambda m: True)
-def handle_confession(message):
-    user_id = message.from_user.id
-    chat_id = message.chat.id
-
-    if str(user_id) in banned_users:
-        bot.reply_to(message, "أنت محظور من استخدام البوت.")
-        return
-
-    if message.chat.type == 'private':
-        # تحقق وقت الإرسال
-        can_send, wait_time = can_send_confession(user_id)
-        if not can_send:
-            bot.reply_to(message, f"⏳ انتظر {wait_time} ثانية قبل إرسال اعتراف جديد.")
-            return
-
-        # تحقق من الاشتراك في مجموعات البوت
-        user_chats = []
-        for g_id in groups.keys():
-            try:
-                member = bot.get_chat_member(int(g_id), user_id)
-                if member.status in ['member', 'administrator', 'creator']:
-                    user_chats.append(int(g_id))
-            except:
-                continue
-
-        if len(user_chats) == 0:
-            bot.reply_to(message, "✖️ أنت لست مشترك بأي من مجموعاتنا.")
-            return
-        elif len(user_chats) == 1:
-            send_confession_to_owner(user_chats[0], message.text, message.from_user)
-            bot.reply_to(message, "تم إرسال اعترافك وسيتم مراجعته من قبل مالك المجموعة.")
-        else:
-            markup = telebot.types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
-            for gid in user_chats:
-                markup.add(telebot.types.KeyboardButton(f"مجوعة: {gid}"))
-            msg = bot.reply_to(message, "اختر المجموعة التي تريد إرسال الاعتراف إليها:", reply_markup=markup)
-
-            bot.register_next_step_handler(msg, lambda m: handle_group_choice(m, message))
 
 def handle_group_choice(msg, original_message):
     selected_text = msg.text
@@ -231,19 +218,72 @@ def handle_group_choice(msg, original_message):
     send_confession_to_owner(int(group_id), original_message.text, original_message)
     bot.reply_to(msg, "تم إرسال اعترافك وسيتم مراجعته من قبل مالك المجموعة.")
 
+@bot.message_handler(func=lambda m: True, content_types=['text', 'photo', 'audio', 'voice', 'video', 'document'])
+def handle_confession(message):
+    user_id = message.from_user.id
+
+    if str(user_id) in banned_users:
+        bot.reply_to(message, "أنت محظور من استخدام البوت.")
+        return
+
+    if message.chat.type != 'private':
+        bot.reply_to(message, "يرجى إرسال الاعتراف في الخاص فقط.")
+        return
+
+    can_send, wait_time = can_send_confession(user_id)
+    if not can_send:
+        bot.reply_to(message, f"⏳ انتظر {wait_time} ثانية قبل إرسال اعتراف جديد.")
+        return
+
+    # تحقق من اشتراك المستخدم بالكروبات
+    user_chats = []
+    for g_id in groups.keys():
+        try:
+            member = bot.get_chat_member(int(g_id), user_id)
+            if member.status in ['member', 'administrator', 'creator']:
+                user_chats.append(int(g_id))
+        except:
+            continue
+
+    if len(user_chats) == 0:
+        bot.reply_to(message, "✖️ أنت لست مشترك بأي من مجموعاتنا.")
+        return
+    elif len(user_chats) == 1:
+        # ارسال الاعتراف
+        if message.content_type == 'text':
+            send_confession_to_owner(user_chats[0], message.text, message.from_user, 'text')
+        elif message.content_type == 'photo':
+            file_id = message.photo[-1].file_id
+            send_confession_to_owner(user_chats[0], file_id, message.from_user, 'photo')
+        elif message.content_type == 'audio':
+            send_confession_to_owner(user_chats[0], message.audio.file_id, message.from_user, 'audio')
+        elif message.content_type == 'voice':
+            send_confession_to_owner(user_chats[0], message.voice.file_id, message.from_user, 'voice')
+        elif message.content_type == 'video':
+            send_confession_to_owner(user_chats[0], message.video.file_id, message.from_user, 'video')
+        elif message.content_type == 'document':
+            send_confession_to_owner(user_chats[0], message.document.file_id, message.from_user, 'document')
+        bot.reply_to(message, "تم إرسال اعترافك وسيتم مراجعته من قبل مالك المجموعة.")
+    else:
+        markup = telebot.types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
+        for gid in user_chats:
+            markup.add(telebot.types.KeyboardButton(f"مجوعة: {gid}"))
+        msg = bot.reply_to(message, "اختر المجموعة التي تريد إرسال الاعتراف إليها:", reply_markup=markup)
+        bot.register_next_step_handler(msg, lambda m: handle_group_choice(m, message))
+
 def auto_send_messages():
     for group_id in groups.keys():
-        if locks.get(group_id, False):
+        if locks.get(str(group_id), False):
             continue
         try:
             msg = random.choice(messages)
             bot.send_message(int(group_id), f"🔔 رسالة تحفيزية:\n{msg}")
         except:
-            continue
+            pass
     threading.Timer(7200, auto_send_messages).start()  # كل ساعتين
 
 auto_send_messages()
 
 print("بوت الاعترافات شغال...")
 
-bot.polling()
+bot.infinity_polling()
