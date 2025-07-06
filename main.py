@@ -4,7 +4,7 @@ import time
 import threading
 import random
 
-TOKEN = "AAFPyBi4QPJWQKQB9qM3dBzQwizFYh3XjU0"
+TOKEN = "7787936953:AAFPyBi4QPJWQKQB9qM3dBzQwizFYh3XjU0"
 DEVELOPER_ID = 123456789  # حط ايديك هنا
 
 bot = telebot.TeleBot(TOKEN)
