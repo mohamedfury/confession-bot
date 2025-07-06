@@ -5,204 +5,163 @@ import threading
 import random
 
 TOKEN = "7787936953:AAFPyBi4QPJWQKQB9qM3dBzQwizFYh3XjU0"
-DEVELOPER_ID = 123456789  # غير رقم المطور إلى رقمك الحقيقي
+DEVELOPER_ID = 674291793  # غيره لأيديك
 
 bot = telebot.TeleBot(TOKEN)
 
-# --- تحميل وحفظ البيانات من/إلى ملفات JSON ---
-def load_json(filename):
+# --- ملفات JSON ---
+def load_json(file):
     try:
-        with open(filename, 'r', encoding='utf-8') as f:
+        with open(file, 'r', encoding='utf-8') as f:
             return json.load(f)
     except:
         return {}
 
-def save_json(filename, data):
-    with open(filename, 'w', encoding='utf-8') as f:
+def save_json(file, data):
+    with open(file, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 groups = load_json('groups.json')
 banned = load_json('banned.json')
 confession_locks = load_json('confession_locks.json')
-last_confession_time = load_json('last_confession_time.json')
+last_time = load_json('n_time.json')
 messages = load_json('messages.json')
 
-pending_selections = {}
+pending = {}
 
-START_MSG = "أهلاً بك في بوت الاعترافات. أرسل اعترافك هنا."
-
-# --- دوال التحقق ---
-def is_banned(user_id):
-    return str(user_id) in banned and banned[str(user_id)] == True
-
-def is_confession_locked(group_id):
-    return str(group_id) in confession_locks and confession_locks[str(group_id)] == True
-
-def can_send_confession(user_id):
-    now = time.time()
-    last = last_confession_time.get(str(user_id), 0)
-    if now - last >= 60:  # 60 ثانية بين كل اعتراف
-        last_confession_time[str(user_id)] = now
-        save_json('last_confession_time.json', last_confession_time)
-        return True
-    else:
-        return False
-
-def get_random_message():
-    if messages:
-        return random.choice(messages)
-    else:
-        return "اعترف الآن بصدق وأمانة"
-
-# --- استقبال الأمر /start ---
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    if message.chat.type == 'private':
-        bot.send_message(message.chat.id, START_MSG)
-
-# --- تسجيل البوت عند إضافته كمشرف لمجموعة ---
-@bot.message_handler(func=lambda m: m.chat.type != 'private' and m.new_chat_members)
-def check_bot_added_as_admin(message):
-    for member in message.new_chat_members:
-        if member.id == bot.get_me().id:
-            try:
-                chat_member = bot.get_chat_member(message.chat.id, bot.get_me().id)
-                if chat_member.status not in ['administrator', 'creator']:
-                    bot.send_message(message.chat.id, "⚠️ يجب أن أكون مشرفًا في المجموعة لأتمكن من العمل.")
-                    return
-                group_id = str(message.chat.id)
-                groups[group_id] = message.chat.title
-                save_json('groups.json', groups)
-                bot.send_message(message.chat.id, "✅ تم إضافة البوت بنجاح كمشرف!")
-            except:
-                pass
-
-# --- معالجة الاعترافات ---
-@bot.message_handler(func=lambda m: m.chat.type == 'private', content_types=['text', 'photo', 'audio', 'voice', 'video', 'document'])
-def handle_confession(message):
-    user_id = message.from_user.id
-
-    if user_id in pending_selections:
-        group_id = pending_selections.pop(user_id)
-        if is_confession_locked(group_id):
-            bot.send_message(user_id, "🔒 تم إغلاق استقبال الاعترافات في هذه المجموعة.")
-            return
-        send_confession_to_owner(group_id, message)
-        return
-
-    if is_banned(user_id):
-        bot.send_message(user_id, "🚫 أنت محظور من استخدام البوت.")
-        return
-
-    if not can_send_confession(user_id):
-        bot.send_message(user_id, "⏳ يرجى الانتظار 60 ثانية بين كل اعتراف.")
-        return
-
-    user_groups = []
+# --- رسائل تحفيزية كل ساعتين ---
+def send_motivations():
     for gid in groups.keys():
         try:
-            member = bot.get_chat_member(int(gid), user_id)
-            if member.status not in ['left', 'kicked']:
-                user_groups.append(gid)
+            msg = random.choice(messages) if messages else "اعترف الآن بصدق وأمانة"
+            bot.send_message(int(gid), f"✨ {msg}")
         except:
             pass
+    threading.Timer(7200, send_motivations).start()
 
-    if len(user_groups) == 0:
-        bot.send_message(user_id, "❌ لا توجد لديك مجموعات مشتركة لإرسال اعتراف.")
-        return
-    elif len(user_groups) == 1:
-        group_id = user_groups[0]
-        if is_confession_locked(group_id):
-            bot.send_message(user_id, "🔒 تم إغلاق استقبال الاعترافات في هذه المجموعة.")
-            return
-        send_confession_to_owner(group_id, message)
-    else:
-        markup = telebot.types.InlineKeyboardMarkup()
-        for gid in user_groups:
-            try:
-                chat = bot.get_chat(int(gid))
-                btn = telebot.types.InlineKeyboardButton(chat.title, callback_data=f"select_group_{gid}")
-                markup.add(btn)
-            except:
-                pass
-        bot.send_message(user_id, "📌 اختر المجموعة التي تريد إرسال الاعتراف لها:", reply_markup=markup)
+send_motivations()
 
-# --- اختيار المجموعة عبر أزرار Inline ---
-@bot.callback_query_handler(func=lambda call: call.data.startswith("select_group_"))
-def callback_select_group(call):
+# --- أمر التفعيل من الكالك ---
+@bot.callback_query_handler(func=lambda call: call.data == "تفعيل")
+def activate(call):
+    chat_id = call.message.chat.id
     user_id = call.from_user.id
-    group_id = call.data.split("_")[-1]
+    try:
+        admin = bot.get_chat_member(chat_id, user_id)
+        if admin.status in ['administrator', 'creator']:
+            groups[str(chat_id)] = bot.get_chat(chat_id).title
+            save_json('groups.json', groups)
+            bot.send_message(chat_id, "✅ تم تفعيل البوت في هذه المجموعة.")
+        else:
+            bot.send_message(chat_id, "🚫 فقط المشرفين يمكنهم تفعيل البوت.")
+    except:
+        bot.send_message(chat_id, "❌ حدث خطأ أثناء التفعيل.")
 
-    if is_banned(user_id):
+# --- رسالة خاصة: اعتراف ---
+@bot.message_handler(func=lambda m: m.chat.type == "private", content_types=['text', 'photo', 'voice', 'audio', 'video', 'document'])
+def confession(message):
+    uid = str(message.from_user.id)
+
+    if uid in pending:
+        gid = pending.pop(uid)
+        if confession_locks.get(gid):
+            bot.send_message(uid, "🔒 الاعترافات مغلقة في هذه المجموعة.")
+            return
+        return send_confession(gid, message)
+
+    if banned.get(uid):
+        return bot.send_message(uid, "🚫 أنت محظور من استخدام البوت.")
+
+    now = time.time()
+    if now - last_time.get(uid, 0) < 60:
+        return bot.send_message(uid, "⏳ يجب الانتظار 60 ثانية بين كل اعتراف.")
+    last_time[uid] = now
+    save_json("n_time.json", last_time)
+
+    shared = []
+    for gid in groups:
+        try:
+            mem = bot.get_chat_member(int(gid), int(uid))
+            if mem.status not in ['left', 'kicked']:
+                shared.append(gid)
+        except:
+            continue
+
+    if len(shared) == 0:
+        return bot.send_message(uid, "❌ لا توجد مجموعات مشتركة.")
+
+    if len(shared) == 1:
+        if confession_locks.get(shared[0]):
+            return bot.send_message(uid, "🔒 الاعترافات مغلقة لهذه المجموعة.")
+        return send_confession(shared[0], message)
+
+    markup = telebot.types.InlineKeyboardMarkup()
+    for gid in shared:
+        chat = bot.get_chat(int(gid))
+        markup.add(telebot.types.InlineKeyboardButton(chat.title, callback_data=f"group_{gid}"))
+    bot.send_message(uid, "📌 اختر المجموعة لإرسال الاعتراف:", reply_markup=markup)
+
+# --- اختيار مجموعة من الزر ---
+@bot.callback_query_handler(func=lambda call: call.data.startswith("group_"))
+def choose_group(call):
+    user_id = str(call.from_user.id)
+    group_id = call.data.split("_")[1]
+
+    if banned.get(user_id):
         bot.answer_callback_query(call.id, "🚫 أنت محظور من استخدام البوت.")
         return
 
-    if is_confession_locked(group_id):
-        bot.answer_callback_query(call.id, "🔒 المجموعة مغلقة أمام الاعترافات.")
+    if confession_locks.get(group_id):
+        bot.answer_callback_query(call.id, "🔒 الاعترافات مغلقة في هذه المجموعة.")
         return
 
-    pending_selections[user_id] = group_id
-    bot.answer_callback_query(call.id, "✅ تم اختيار المجموعة، الرجاء إعادة إرسال اعترافك.")
-    bot.send_message(user_id, "📩 الرجاء إعادة إرسال اعترافك الآن.")
+    pending[user_id] = group_id
+    bot.answer_callback_query(call.id, "✅ تم اختيار المجموعة، أعد إرسال اعترافك.")
+    bot.send_message(call.from_user.id, "📩 أرسل اعترافك الآن.")
 
-# --- إرسال الاعتراف للمالك ---
-def send_confession_to_owner(group_id, message):
-    group_owner_id = DEVELOPER_ID
-
+# --- إرسال الاعتراف للمطور ---
+def send_confession(group_id, message):
     try:
-        caption = f"📢 اعتراف جديد في المجموعة: {groups.get(group_id, group_id)}\n\n" \
+        caption = f"📢 اعتراف جديد في المجموعة: {groups.get(group_id, group_id)}\n" \
                   f"من: {message.from_user.first_name} (ID: {message.from_user.id})\n\n"
-
         if message.content_type == 'text':
-            bot.send_message(group_owner_id, caption + message.text)
+            bot.send_message(DEVELOPER_ID, caption + message.text)
         elif message.content_type == 'photo':
             file_id = message.photo[-1].file_id
-            bot.send_photo(group_owner_id, file_id, caption=caption + "[صورة مرفقة]")
+            bot.send_photo(DEVELOPER_ID, file_id, caption=caption + "[صورة مرفقة]")
         elif message.content_type == 'voice':
-            bot.send_voice(group_owner_id, message.voice.file_id, caption=caption + "[رسالة صوتية]")
-        elif message.content_type == 'video':
-            bot.send_video(group_owner_id, message.video.file_id, caption=caption + "[فيديو مرفق]")
+            bot.send_voice(DEVELOPER_ID, message.voice.file_id, caption=caption + "[رسالة صوتية]")
         elif message.content_type == 'audio':
-            bot.send_audio(group_owner_id, message.audio.file_id, caption=caption + "[ملف صوتي]")
+            bot.send_audio(DEVELOPER_ID, message.audio.file_id, caption=caption + "[ملف صوتي]")
+        elif message.content_type == 'video':
+            bot.send_video(DEVELOPER_ID, message.video.file_id, caption=caption + "[فيديو مرفق]")
         elif message.content_type == 'document':
-            bot.send_document(group_owner_id, message.document.file_id, caption=caption + "[ملف مرفق]")
+            bot.send_document(DEVELOPER_ID, message.document.file_id, caption=caption + "[ملف مرفق]")
         else:
-            bot.send_message(group_owner_id, caption + "[نوع رسالة غير مدعوم]")
+            bot.send_message(DEVELOPER_ID, caption + "[نوع رسالة غير مدعوم]")
 
         bot.send_message(message.from_user.id, "✅ تم إرسال اعترافك بنجاح.")
     except Exception as e:
         bot.send_message(message.from_user.id, "❌ حدث خطأ أثناء إرسال اعترافك.")
         print("Error sending confession:", e)
 
-# --- أوامر قفل وفتح الاعترافات (للمطور وادارة المجموعات) ---
+# --- أوامر القفل والفتح ---
 @bot.message_handler(commands=['قفل', 'فتح'])
 def lock_unlock_confession(message):
     user_id = message.from_user.id
+    chat_id = str(message.chat.id)
 
-    # تحقق إذا المستخدم هو المطور أو مشرف في المجموعة
-    is_admin = False
     try:
-        if user_id == DEVELOPER_ID:
-            is_admin = True
-        else:
-            # هنا نتحقق من كل مجموعة هل هو مشرف فيها
-            for gid in groups.keys():
-                try:
-                    status = bot.get_chat_member(int(gid), user_id).status
-                    if status in ['administrator', 'creator']:
-                        is_admin = True
-                        break
-                except:
-                    continue
+        admin = bot.get_chat_member(message.chat.id, user_id)
+        if user_id != DEVELOPER_ID and admin.status not in ['administrator', 'creator']:
+            bot.reply_to(message, "🚫 هذا الأمر فقط للمطور أو مدراء المجموعة.")
+            return
     except:
-        pass
-
-    if not is_admin:
-        bot.reply_to(message, "🚫 هذا الأمر فقط للمطور أو مدراء المجموعة.")
+        bot.reply_to(message, "❌ حدث خطأ أثناء التحقق.")
         return
 
     args = message.text.split()
-    if len(args) != 2:
+    if len(args) == 1:
         bot.reply_to(message, "🔢 استخدم الأمر مع معرف المجموعة: /قفل <group_id> أو /فتح <group_id>")
         return
 
@@ -210,14 +169,14 @@ def lock_unlock_confession(message):
 
     if message.text.startswith('/قفل'):
         confession_locks[group_id] = True
-    else:
+        save_json('confession_locks.json', confession_locks)
+        bot.reply_to(message, f"✅ تم قفل الاعترافات في المجموعة {group_id}")
+    elif message.text.startswith('/فتح'):
         confession_locks[group_id] = False
+        save_json('confession_locks.json', confession_locks)
+        bot.reply_to(message, f"✅ تم فتح الاعترافات في المجموعة {group_id}")
 
-    save_json('confession_locks.json', confession_locks)
-    action = "تم قفل" if message.text.startswith('/قفل') else "تم فتح"
-    bot.reply_to(message, f"✅ {action} الاعترافات في المجموعة {group_id}")
-
-# --- أوامر حظر ورفع الحظر (للمطور فقط) ---
+# --- أوامر الحظر ورفع الحظر ---
 @bot.message_handler(commands=['حظر', 'الغاء_الحظر'])
 def ban_unban(message):
     user_id = message.from_user.id
@@ -234,68 +193,12 @@ def ban_unban(message):
 
     if message.text.startswith('/حظر'):
         banned[target_id] = True
-    else:
+        save_json('banned.json', banned)
+        bot.reply_to(message, f"✅ تم حظر المستخدم {target_id}")
+    elif message.text.startswith('/الغاء_الحظر'):
         banned[target_id] = False
-
-    save_json('banned.json', banned)
-    action = "تم حظر" if message.text.startswith('/حظر') else "تم رفع الحظر عن"
-    bot.reply_to(message, f"✅ {action} المستخدم {target_id}")
-
-# --- أمر إرسال إذاعة للمطور (broadcast) ---
-@bot.message_handler(commands=['اذاعة'])
-def broadcast(message):
-    user_id = message.from_user.id
-    if user_id != DEVELOPER_ID:
-        bot.reply_to(message, "🚫 هذا الأمر فقط للمطور.")
-        return
-
-    args = message.text.split(maxsplit=1)
-    if len(args) < 2:
-        bot.reply_to(message, "✍️ يرجى كتابة نص الرسالة بعد الأمر: /اذاعة نص الرسالة")
-        return
-
-    broadcast_text = args[1]
-    success_count = 0
-    fail_count = 0
-    for gid in groups.keys():
-        try:
-            bot.send_message(int(gid), broadcast_text)
-            success_count += 1
-        except:
-            fail_count += 1
-
-    bot.reply_to(message, f"✅ تم إرسال الإذاعة إلى {success_count} مجموعة، فشل في الإرسال إلى {fail_count} مجموعة.")
-
-# --- إضافة رسالة تحفيزية جديدة ---
-@bot.message_handler(commands=['اضافة_رسالة'])
-def add_motivational_message(message):
-    user_id = message.from_user.id
-    if user_id != DEVELOPER_ID:
-        bot.reply_to(message, "🚫 هذا الأمر فقط للمطور.")
-        return
-
-    args = message.text.split(maxsplit=1)
-    if len(args) < 2:
-        bot.reply_to(message, "✍️ يرجى كتابة الرسالة بعد الأمر: /اضافة_رسالة نص الرسالة")
-        return
-
-    msg_text = args[1]
-    messages.append(msg_text)
-    save_json('messages.json', messages)
-    bot.reply_to(message, "✅ تمت إضافة الرسالة التحفيزية بنجاح.")
-
-# --- إرسال رسائل تحفيزية دورية كل ساعتين ---
-def send_motivational_messages():
-    for gid in groups.keys():
-        try:
-            msg = get_random_message()
-            bot.send_message(int(gid), f"✨ رسالة تحفيزية:\n{msg}")
-        except:
-            pass
-    threading.Timer(7200, send_motivational_messages).start()
-
-send_motivational_messages()
+        save_json('banned.json', banned)
+        bot.reply_to(message, f"✅ تم رفع الحظر عن المستخدم {target_id}")
 
 print("✅ بوت الاعترافات شغال...")
-
 bot.infinity_polling()
